@@ -1,0 +1,17 @@
+# Build output
+x64/
+Win32/
+Debug/
+Release/
+.vs/
+*.obj
+*.pdb
+*.ilk
+*.res
+*.log
+*.user
+build_out.txt
+pkg_out.txt
+
+# Packages
+dist/
