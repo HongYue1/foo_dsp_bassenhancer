@@ -143,7 +143,8 @@ struct Params {          // Calf defaults (= EasyEffects defaults)
     float freq = 100.f;      // "Scope" Hz, 10..250
     bool listen = false;     // Calf's "listen": only the processed signal (proc * amount * level_out), no dry
     float listen_gain = 1.f; // extra linear gain while listening (1 = Calf)
-    bool bypass = false;     // Calf's "bypass": output = original input (overrides listen)
+    bool bypass = false;     // Calf's "bypass": output = original input; with listen: the original bass
+                             // (input through the Scope low-pass, times listen_gain), to A/B the bass
     bool floor_active = false;
     int mode = 0;            // 0 Calf classic, 1 phase-aligned (no comb notch), 2 harmonics only
     float floor = 20.f;      // Hz, 10..120
@@ -182,13 +183,14 @@ public:
         // Listen and Bypass are linear ramps (like Calf's dsp::bypass crossfade), so toggling
         // never clicks. The engine always runs, so the switch is seamless both ways.
         const float dry_t = m_p.listen ? 0.f : 1.f, wet_t = m_p.listen ? m_p.listen_gain : 1.f;
-        const float byp_t = m_p.bypass ? 1.f : 0.f;
+        const float byp_t = m_p.bypass ? 1.f : 0.f, solo_t = m_p.listen ? m_p.listen_gain : 0.f;
         for (size_t i = 0; i < frames; ++i) {
             T* fr = buf + i * C;
             m_dry = ramp(m_dry, dry_t);
             m_wet = ramp(m_wet, wet_t);
             m_byp = ramp(m_byp, byp_t);
-            const float dg = m_dry, wg = m_wet * amt, bg = m_byp;
+            m_solo = ramp(m_solo, solo_t);
+            const float dg = m_dry, wg = m_wet * amt, bg = m_byp, sg = m_solo;
             for (size_t c = 0; c < C; ++c) {
                 Chan& ch = m_ch[c];
                 const float raw = (float)fr[c];
@@ -228,7 +230,12 @@ public:
                 // Calf: listen ? proc * amount * level_out : (proc * amount + in) * level_out.
                 // With the ramps at rest (dg = 1, wg = amt, bg = 0) this is bit-exact with Calf.
                 float out = (proc * wg + dry * dg) * lout;
-                if (bg != 0.f) out = bg == 1.f ? raw : out + bg * (raw - out);
+                if (bg != 0.f) {
+                    // Bypass reference: the original (raw * 1 + lo * 0 == raw exactly), or with
+                    // Listen the original bass solo, so Bypass A/Bs original vs. processed bass.
+                    const float ref = raw * dg + lo * sg;
+                    out = bg == 1.f ? ref : out + bg * (ref - out);
+                }
                 fr[c] = (T)out;
             }
         }
@@ -268,12 +275,12 @@ private:
         if (v == t) return v;
         return v < t ? (std::min)(t, v + m_step * (std::max)(1.f, t - v)) : (std::max)(t, v - m_step * (std::max)(1.f, v - t));
     }
-    void snap_ramps() { m_dry = m_p.listen ? 0.f : 1.f; m_wet = m_p.listen ? m_p.listen_gain : 1.f; m_byp = m_p.bypass ? 1.f : 0.f; }
+    void snap_ramps() { m_dry = m_p.listen ? 0.f : 1.f; m_wet = m_p.listen ? m_p.listen_gain : 1.f; m_byp = m_p.bypass ? 1.f : 0.f; m_solo = m_p.listen ? m_p.listen_gain : 0.f; }
     Params m_p;
     uint32_t m_srate = 44100;
     float m_lin_gain = 1.f;
     static constexpr float kRampSeconds = 0.02f;  // Listen / Bypass crossfade (Calf: 1024 samples)
-    float m_step = 1.f / 882.f, m_dry = 1.f, m_wet = 1.f, m_byp = 0.f;
+    float m_step = 1.f / 882.f, m_dry = 1.f, m_wet = 1.f, m_byp = 0.f, m_solo = 0.f;
     double m_lms_a = 0, m_env_rel = 0;
     static constexpr double kNormLevel = 0.5;                  // shaper drive level (-6 dBFS)
     static constexpr double kHarmMakeup = 3.1622776601683795;  // +10 dB

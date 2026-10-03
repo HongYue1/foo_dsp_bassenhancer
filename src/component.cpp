@@ -62,7 +62,8 @@ struct Settings {
     }
 };
 
-constexpr int32_t kPresetVersion = 3;  // v2 adds bypass, v3 listen gain; older presets still load
+// v2 adds bypass, v3 listen gain, v4 (same layout) has a 0 dB listen gain default; older presets still load
+constexpr int32_t kPresetVersion = 4;
 
 void make_preset(const Settings& s, dsp_preset& out) {
     dsp_preset_builder b;
@@ -81,6 +82,7 @@ Settings parse_preset(const dsp_preset& in) {
         p >> s.mode >> listen >> floor_on >> s.in_db >> s.out_db >> s.amount_db >> s.drive >> s.blend >> s.scope >> s.floor;
         if (ver >= 2) p >> bypass;
         if (ver >= 3) p >> s.listen_db;
+        if (ver == 3 && s.listen_db == 3.f) s.listen_db = 0.f;  // the old +3 dB default -> new 0 dB default
         s.bypass = bypass != 0;
         s.listen = listen != 0;
         s.floor_on = floor_on != 0;
@@ -243,8 +245,9 @@ private:
         GetDlgItem(IDC_LGAIN).EnableWindow(m_s.listen);
         GetDlgItem(IDC_LGAIN_V).EnableWindow(m_s.listen);
         const char* info = kModeInfo[m_s.mode];
-        if (m_s.bypass) info = "BYPASSED: the output is the original, unprocessed audio (like Calf / EasyEffects bypass). Untick to hear the effect again.";
-        else if (m_s.listen) info = "LISTEN: only the bass the enhancer adds, without the original audio (Calf's listen). Level: Amount, Output and Listen gain.";
+        if (m_s.bypass && m_s.listen) info = "LISTEN + BYPASS: the ORIGINAL bass only (below Scope). Untick Bypass to hear the bass the enhancer makes.";
+        else if (m_s.bypass) info = "BYPASSED: the output is the original, unprocessed audio (like Calf / EasyEffects bypass). Untick to hear the effect again.";
+        else if (m_s.listen) info = "LISTEN: only the bass the enhancer makes, without the original audio (Calf's listen). Tick Bypass to compare with the original bass.";
         uSetDlgItemText(m_hWnd, IDC_INFO, info);
     }
 
