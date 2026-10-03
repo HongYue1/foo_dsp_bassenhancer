@@ -52,6 +52,7 @@ Settings are saved in the DSP chain preset.
 - Put it **before** the resampler in the DSP chain. It then runs at the file's native rate, which is cheaper.
 - Start with Phase-aligned mode, Amount 0 to +2 dB, Scope 80–120 Hz, Floor on at 20–30 Hz, and Output 0 dB.
 - The bass lift can push peaks over 0 dBFS. Put foobar2000's **Advanced Limiter** last in the chain instead of lowering Output. Lowering Output also lowers the mids and treble, so the bass sounds weaker by comparison.
+- Changes are heard after foobar2000's output buffer plays out (it holds already-processed audio). If toggling Listen or Bypass feels slow, lower **Preferences > Playback > Output > Buffer length** to about 500 ms.
 - The effect depends on the input level. If ReplayGain or a preamp lowers the level, you may want a little more Amount (or Input).
 
 ## Building
