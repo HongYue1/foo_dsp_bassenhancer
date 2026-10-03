@@ -141,9 +141,9 @@ struct Params {          // Calf defaults (= EasyEffects defaults)
     float drive = 8.5f;      // "Harmonics" 0.1..10
     float blend = 0.f;       // "Blend harmonics" -10 (3rd) .. +10 (2nd)
     float freq = 100.f;      // "Scope" Hz, 10..250
-    bool listen = false;     // bass solo monitor: 8th-order Butterworth LP at 3x Scope, times listen_gain (Calf: wet only)
-    float listen_gain = 1.4125375f;  // linear gain of the bass solo (default +3 dB)
-    bool bypass = false;     // output = original input (still low-passed when listen is on)
+    bool listen = false;     // Calf's "listen": only the processed signal (proc * amount * level_out), no dry
+    float listen_gain = 1.f; // extra linear gain while listening (1 = Calf)
+    bool bypass = false;     // Calf's "bypass": output = original input (overrides listen)
     bool floor_active = false;
     int mode = 0;            // 0 Calf classic, 1 phase-aligned (no comb notch), 2 harmonics only
     float floor = 20.f;      // Hz, 10..120
@@ -166,21 +166,29 @@ public:
             for (auto& f : c.hp) f.reset();
             for (auto& f : c.ap) f.reset();
             for (auto& f : c.post) f.reset();
-            for (auto& f : c.mon) f.reset();
             c.env = 0;
             c.dist.reset();
             c.lin_prev_in = c.lin_prev_out = 0; c.w = 0; c.pw = 1e-9;
         }
+        snap_ramps();
     }
     // Interleaved, in place. Each channel is processed independently, exactly like Calf's
     // stereo path; mono and >2 channels simply use more independent chains.
     template<typename T> void process(T* buf, size_t frames) {
         const size_t C = m_ch.size();
         const float lin = m_p.level_in, lout = m_p.level_out, amt = m_p.amount;
-        const bool listen = m_p.listen, bypass = m_p.bypass, fl = m_p.floor_active;
+        const bool fl = m_p.floor_active;
         const int mode = m_p.mode;
+        // Listen and Bypass are linear ramps (like Calf's dsp::bypass crossfade), so toggling
+        // never clicks. The engine always runs, so the switch is seamless both ways.
+        const float dry_t = m_p.listen ? 0.f : 1.f, wet_t = m_p.listen ? m_p.listen_gain : 1.f;
+        const float byp_t = m_p.bypass ? 1.f : 0.f;
         for (size_t i = 0; i < frames; ++i) {
             T* fr = buf + i * C;
+            m_dry = ramp(m_dry, dry_t);
+            m_wet = ramp(m_wet, wet_t);
+            m_byp = ramp(m_byp, byp_t);
+            const float dg = m_dry, wg = m_wet * amt, bg = m_byp;
             for (size_t c = 0; c < C; ++c) {
                 Chan& ch = m_ch[c];
                 const float raw = (float)fr[c];
@@ -217,18 +225,19 @@ public:
                 if (fl) proc = (float)ch.hp[0].process(ch.hp[1].process(proc));
                 float dry = in;
                 if (mode == 1) dry = (float)ch.ap[1].process(ch.ap[0].process(in));  // LP^4 phase == AP^2 phase
-                // The engine always runs, so Bypass / Listen toggles are seamless.
-                float out = bypass ? raw : (proc * amt + dry) * lout;
-                if (listen) out = float(m_p.listen_gain * ch.mon[3].process(ch.mon[2].process(ch.mon[1].process(ch.mon[0].process(out)))));
+                // Calf: listen ? proc * amount * level_out : (proc * amount + in) * level_out.
+                // With the ramps at rest (dg = 1, wg = amt, bg = 0) this is bit-exact with Calf.
+                float out = (proc * wg + dry * dg) * lout;
+                if (bg != 0.f) out = bg == 1.f ? raw : out + bg * (raw - out);
                 fr[c] = (T)out;
             }
         }
     }
 private:
-    struct Chan { Biquad lp[4], hp[2], ap[2], post[2], mon[4]; double env = 0; TapDistortion dist; float lin_prev_in = 0, lin_prev_out = 0; double w = 0, pw = 1e-9; };
+    struct Chan { Biquad lp[4], hp[2], ap[2], post[2]; double env = 0; TapDistortion dist; float lin_prev_in = 0, lin_prev_out = 0; double w = 0, pw = 1e-9; };
     void apply(const Params& p, bool force) {
-        if (p.listen && !m_p.listen) for (auto& c : m_ch) for (auto& f : c.mon) f.reset();
         m_p = p;
+        if (force) snap_ramps();
         if (m_ch.empty()) return;
         if (force || p.freq != m_freq_old) {
             m_ch[0].lp[0].set_lp_rbj(p.freq, 0.707f, (float)m_srate);
@@ -237,13 +246,6 @@ private:
             for (auto& c : m_ch) for (auto& f : c.ap) f.copy_coeffs(ap);
             Biquad post; post.set_lp_rbj((std::min)(4.f * p.freq, 0.45f * (float)m_srate), 0.707f, (float)m_srate);
             for (auto& c : m_ch) for (auto& f : c.post) f.copy_coeffs(post);
-            // 8th-order Butterworth (-48 dB/oct): 1 kHz is ~-80 dB at the default Scope.
-            static constexpr float kButterQ[4] = { 0.50980f, 0.60134f, 0.89998f, 2.56292f };
-            const float fm = (std::min)(3.f * p.freq, 0.45f * (float)m_srate);
-            for (int k = 0; k < 4; ++k) {
-                Biquad m; m.set_lp_rbj(fm, kButterQ[k], (float)m_srate);
-                for (auto& c : m_ch) c.mon[k].copy_coeffs(m);
-            }
             m_freq_old = p.freq;
         }
         if (force || p.floor != m_floor_old || p.floor_active != m_floor_active_old) {
@@ -260,10 +262,18 @@ private:
         } else m_lin_gain = 1.f;
         m_lms_a = 1.0 - std::exp(-1.0 / (0.030 * m_srate));  // ~30 ms tracking
         m_env_rel = 1.0 - std::exp(-1.0 / (0.150 * m_srate));  // 150 ms envelope release
+        m_step = 1.f / (kRampSeconds * (float)m_srate);
     }
+    float ramp(float v, float t) const {
+        if (v == t) return v;
+        return v < t ? (std::min)(t, v + m_step * (std::max)(1.f, t - v)) : (std::max)(t, v - m_step * (std::max)(1.f, v - t));
+    }
+    void snap_ramps() { m_dry = m_p.listen ? 0.f : 1.f; m_wet = m_p.listen ? m_p.listen_gain : 1.f; m_byp = m_p.bypass ? 1.f : 0.f; }
     Params m_p;
     uint32_t m_srate = 44100;
     float m_lin_gain = 1.f;
+    static constexpr float kRampSeconds = 0.02f;  // Listen / Bypass crossfade (Calf: 1024 samples)
+    float m_step = 1.f / 882.f, m_dry = 1.f, m_wet = 1.f, m_byp = 0.f;
     double m_lms_a = 0, m_env_rel = 0;
     static constexpr double kNormLevel = 0.5;                  // shaper drive level (-6 dBFS)
     static constexpr double kHarmMakeup = 3.1622776601683795;  // +10 dB

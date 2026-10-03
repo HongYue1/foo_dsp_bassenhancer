@@ -6,7 +6,7 @@ A bass enhancer DSP for **foobar2000 v2** (x86 and x64). It is a port of the **C
 - **Phase-aligned** mode removes Calf's bass dip around 50 Hz.
 - **Harmonics only** mode adds overtones without extra low-end energy.
 - Settings apply live while music plays, with no clicks.
-- **Listen** (bass solo) and **Bypass** let you A/B the result.
+- **Listen** (hear only what the enhancer adds) and **Bypass** work like Calf / EasyEffects, with click-free 20 ms crossfades.
 
 ## Install
 1. Download `foo_dsp_bassenhancer.fb2k-component` from [Releases](../../releases/latest).
@@ -41,9 +41,9 @@ Bass level change on a −12 dBFS test tone with default settings (Amount 0 dB):
 | Scope | 10–250 Hz (100) | The bass below this frequency gets processed |
 | Floor | 10–120 Hz (20, off) | High-pass on the processed bass to remove sub-rumble |
 | Input / Output | −36…+36 dB (0) | Gain before and after the effect |
-| Listen | off | Bass solo: an 8th-order low-pass at 3× Scope, so you hear only the bass and its lower harmonics |
-| Listen gain | −12…+12 dB (+3) | Volume of the bass solo |
-| Bypass | off | Plays the original audio. With Listen on, plays the original bass solo, so toggling Bypass A/Bs the bass. |
+| Listen | off | Calf's Listen: plays only the processed bass and harmonics the enhancer adds, without the original audio (Amount × Output). In Harmonics only mode you hear just the overtones. |
+| Listen gain | −12…+12 dB (0) | Extra volume while listening (0 dB = Calf's level) |
+| Bypass | off | Calf's Bypass: plays the original, unprocessed audio. It overrides Listen. The effect keeps running, so switching back is seamless. |
 | Reset | | Restores the defaults |
 
 Settings are saved in the DSP chain preset.
@@ -71,6 +71,7 @@ Source files:
 - `src/component.cpp`: the foobar2000 DSP and the settings dialog
 
 ## Changelog
+- **1.4.0**: Listen and Bypass now work like Calf / EasyEffects. Listen plays only what the enhancer adds (instead of a low-passed bass solo), and Bypass always plays the original. Both crossfade in 20 ms, so toggling no longer clicks. Listen gain defaults to 0 dB. With both off the output is unchanged (bit-exact with 1.3.1).
 - **1.3.1**: x86 (32-bit) build added to the package.
 - **1.3.0**: Listen gain slider.
 - **1.2.x**: Listen is now a bass-solo monitor (8th-order low-pass at 3× Scope) that works together with Bypass for A/B comparison. Bypass and Listen states are shown in the dialog and logged to the console.

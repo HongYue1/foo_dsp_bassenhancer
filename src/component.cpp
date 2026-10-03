@@ -16,7 +16,7 @@
 #include "resource.h"
 #include "bass_enhancer.h"
 
-#define COMPONENT_VERSION "1.3.1"
+#define COMPONENT_VERSION "1.4.0"
 
 DECLARE_COMPONENT_VERSION(
     "Bass Enhancer", COMPONENT_VERSION,
@@ -41,7 +41,7 @@ struct Settings {
     bool bypass = false;
     float in_db = 0.f, out_db = 0.f, amount_db = 0.f;
     float drive = 8.5f, blend = 0.f, scope = 100.f, floor = 20.f;
-    float listen_db = 3.f;
+    float listen_db = 0.f;  // 0 dB = Calf's listen level
 
     calfbass::Params to_params() const {
         auto lin = [](float db) { return db <= -36.f ? 0.f : std::pow(10.f, db / 20.f); };
@@ -243,9 +243,8 @@ private:
         GetDlgItem(IDC_LGAIN).EnableWindow(m_s.listen);
         GetDlgItem(IDC_LGAIN_V).EnableWindow(m_s.listen);
         const char* info = kModeInfo[m_s.mode];
-        if (m_s.bypass && m_s.listen) info = "LISTEN + BYPASS: bass solo of the ORIGINAL audio. Untick Bypass to hear the enhanced bass.";
-        else if (m_s.listen) info = "LISTEN: bass solo of the ENHANCED audio (everything above ~3x Scope is filtered out; level set by Listen gain). Tick Bypass to compare with the original.";
-        else if (m_s.bypass) info = "BYPASSED: the output is the original, unprocessed audio.";
+        if (m_s.bypass) info = "BYPASSED: the output is the original, unprocessed audio (like Calf / EasyEffects bypass). Untick to hear the effect again.";
+        else if (m_s.listen) info = "LISTEN: only the bass the enhancer adds, without the original audio (Calf's listen). Level: Amount, Output and Listen gain.";
         uSetDlgItemText(m_hWnd, IDC_INFO, info);
     }
 
